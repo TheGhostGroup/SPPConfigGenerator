@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 
@@ -12,6 +13,7 @@ namespace SPP_Config_Generator
 {
 	public class ShellViewModel : Screen
 	{
+		// Setup our public variables and such, many are saved within the general settings class, so we'll get/set from those
 		public string AppTitle { get; set; } = $"SPP Config Generator v{Assembly.GetExecutingAssembly().GetName().Version.ToString()}";
 		public double WindowTop { get { return GeneralSettingsManager.GeneralSettings.WindowTop; } set { GeneralSettingsManager.GeneralSettings.WindowTop = value; } }
 		public double WindowLeft { get { return GeneralSettingsManager.GeneralSettings.WindowLeft; } set { GeneralSettingsManager.GeneralSettings.WindowLeft = value; } }
@@ -23,34 +25,50 @@ namespace SPP_Config_Generator
 		public int MySQLPort { get { return GeneralSettingsManager.GeneralSettings.MySQLPort; } set { GeneralSettingsManager.GeneralSettings.MySQLPort = value; } }
 		public string MySQLUser { get { return GeneralSettingsManager.GeneralSettings.MySQLUser; } set { GeneralSettingsManager.GeneralSettings.MySQLUser = value; } }
 		public string MySQLPass { get { return GeneralSettingsManager.GeneralSettings.MySQLPass; } set { GeneralSettingsManager.GeneralSettings.MySQLPass = value; } }
+		// These are the collections we'll be using, pulled from the Default Templates folder,
+		// or from the existing WoW installation if the folder is defined
 		public BindableCollection<ConfigEntry> WorldCollectionTemplate { get; set; } = new BindableCollection<ConfigEntry>();
 		public BindableCollection<ConfigEntry> BnetCollectionTemplate { get; set; } = new BindableCollection<ConfigEntry>();
 		public BindableCollection<ConfigEntry> WorldCollection { get; set; } = new BindableCollection<ConfigEntry>();
 		public BindableCollection<ConfigEntry> BnetCollection { get; set; } = new BindableCollection<ConfigEntry>();
-		public string HelpAbout { get; set; } = string.Empty;
+		// stores the filesystem path to the files
+		public string WowConfigFile { get; set; } = string.Empty;
+		public string BnetConfFile { get; set; } = string.Empty;
+		public string WorldConfFile { get; set; } = string.Empty;
+		// The statusbox is the status line displayed next to buttons
 		public string StatusBox { get; set; }
+		// This is the text for the log pane on the right side
 		public string LogText { get; set; }
-
-		// To Do -
-		// Fix crash during check (and save/export) if no saved files loaded - refresh from template first?
 
 		public ShellViewModel()
 		{
 			Log("App Initializing...");
-			// Pull in saved settings, adjust window position if needed
+			
+			// Pull in saved settings
 			Log("Loading settings");
 			LoadSettings();
-			PopulateHelp();
+			
+			// Alert if this variable is empty, it means we either have no saved settings
+			// Or the SPP folder location was never set
+			if (SPPFolderLocation == string.Empty)
+				StatusBox = "Please set SPP Location in the General Settings tab";
+
+			// If the window was last saved in position that is no longer
+			// in view, then move it
 			Log("Set Window position/width/height, moving into view");
 			GeneralSettingsManager.MoveIntoView();
 		}
 
+		// Pass in a collection, and which setting/value we want to change
+		// then return back the updated collection
 		public BindableCollection<ConfigEntry> UpdateConfigCollection(BindableCollection<ConfigEntry> collection, string entry, string value)
 		{
 			foreach (var item in collection)
 			{
-				if (item.Name.Contains(entry))
+				if (string.Equals(item.Name, entry, StringComparison.OrdinalIgnoreCase))
 				{
+					// Update the value, then stop processing in case there's a duplicate.
+					// We'll update the first, it's most likely the original/valid one
 					item.Value = value;
 					break;
 				}
@@ -59,16 +77,18 @@ namespace SPP_Config_Generator
 			return collection;
 		}
 
+		// We want to set the external/hosting IP setting for the DB listing in the realm,
+		// for the ExternalAddress setting in bnet, and in the WOW config portal entry
 		public void SetIP()
 		{
 			string input = string.Empty;
 			// Check if there are valid targets for spp/wow config, sql - report if any missing
 			// As long as we set Bnet REST IP first, then WoW config will be updated as well
-			input = Microsoft.VisualBasic.Interaction.InputBox("Enter the Listening/Hosted IP Address to set. Note this entry will not be validated to accuracy.", "Set IP", "127.0.0.1");
+			input = Microsoft.VisualBasic.Interaction.InputBox("Enter the Listening/Hosted IP Address to set. If this is to be hosted for local network then use the LAN ipv4 address. If external hosting, use the WAN address. Note this entry will not be validated to accuracy.", "Set IP", "127.0.0.1");
 
 			// If user hit didn't cancel or enter something stupid...
-			// length > 7 is 4 at least 4 numbers for an IP, and 3 . within an IP
-			if (input.Length > 7)
+			// length > 6 is at least 4 numbers for an IP, and 3 . within an IP
+			if (input.Length > 6)
 			{
 				// Update Bnet entry
 				BnetCollection = UpdateConfigCollection(BnetCollection, "LoginREST.ExternalAddress", input);
@@ -83,15 +103,16 @@ namespace SPP_Config_Generator
 			}
 		}
 
+		// We need the realm build entry, and both .conf build settings to be the same
 		public void SetBuild()
 		{
 			string input = string.Empty;
 
 			// Grab the input
-			input = Microsoft.VisualBasic.Interaction.InputBox("Available builds: 26124, 26365, 26654, 26822, 26899, or 26972", "Set Build", "26972");
+			input = Microsoft.VisualBasic.Interaction.InputBox("Enter the 7.3.5 (xxxxx) build from your client. Available builds: 26124, 26365, 26654, 26822, 26899, or 26972", "Set Build", "26972");
 
 			// If user hit didn't cancel or enter something stupid...
-			// all build numbers are 5 total chars
+			// all build numbers are 5 total chars so ignore everything else
 			if (input.Length == 5)
 			{
 				// Update Bnet entry
@@ -107,6 +128,8 @@ namespace SPP_Config_Generator
 			}
 		}
 
+		// This takes current settings in the default templates, and 
+		// overwrites our current settings with those defaults
 		public void SetDefaults()
 		{
 			// Do we do anything other than drop template collection onto world/bnet saved ones?
@@ -121,15 +144,19 @@ namespace SPP_Config_Generator
 				BnetCollection = BnetCollectionTemplate;
 		}
 
-		public bool CheckCollectionForMatch(BindableCollection<ConfigEntry> collection, string searchItem)
+		// We take the incoming collection, and search string, and go through each entry
+		// to see if we have a match in the name/setting only. We don't care about a match
+		// in the value or description
+		public bool CheckCollectionForMatch(BindableCollection<ConfigEntry> collection, string searchValue)
 		{
-			bool match = false;
+			bool match = false; // set our default
 
 			foreach (var item in collection)
 			{
-				if (item.Name == searchItem)
+				if (string.Equals(NormalizeString(item.Name), NormalizeString(searchValue), StringComparison.OrdinalIgnoreCase))
 				{
-					// Found a match, can stop checking this round
+					// Found a match, can stop checking in case there is a duplicate
+					// and that can be checked by another method
 					match = true;
 					break;
 				}
@@ -138,178 +165,286 @@ namespace SPP_Config_Generator
 			return match;
 		}
 
+		// Pass in our collection, and search value, and return any value for the matching setting
+		// based on case-insensitive match
+		public string GetValueFromCollection(BindableCollection<ConfigEntry> collection, string searchValue)
+		{
+			string result = string.Empty;
+
+			// Populate from collection and check each entry as long as the 
+			// isn't empty. May no longer need to return a normalized string if the
+			// parsing was correct when reading from file. May remove later...
+			if (collection != null)
+				foreach (var item in collection)
+					if (string.Equals(NormalizeString(item.Name), NormalizeString(searchValue), StringComparison.OrdinalIgnoreCase))
+						result = item.Value;
+
+			return NormalizeString(result);
+		}
+
+		// Take a collection, and search value, and find if there's a matching setting.
+		// If so, if that setting = 1 then return true. This is assuming that the one
+		// being searched for is only for valid for 0/1 as the value
+		public bool IsOptionEnabled(BindableCollection<ConfigEntry> collection, string searchValue)
+		{
+			bool result = false;
+
+			if (collection != null)
+				foreach (var item in collection)
+					if (string.Equals(NormalizeString(item.Name), NormalizeString(searchValue), StringComparison.OrdinalIgnoreCase) && item.Value == "1")
+						result = true;
+
+			return result;
+		}
+
+		// strip out white space
+		public string NormalizeString(string incoming)
+		{
+			return Regex.Replace(incoming, @"\s", "");
+		}
+
+		// Take the incoming collection, parse through and see if there are more than
+		// 1 entry (case insensitive) for the setting name. Return the setting name(s)
+		// if this happens.
+		public string CheckCollectionForDuplicates(BindableCollection<ConfigEntry> collection)
+		{
+			string results = string.Empty;
+
+			foreach (var item in collection)
+			{
+				int matches = 0;
+				foreach (var item2 in collection)
+				{
+					if (string.Equals(item.Name, item2.Name, StringComparison.OrdinalIgnoreCase))
+						matches++;
+				}
+
+				// There will naturally be 1 match as an entry matches itself. Anything more is a problem...
+				// Only add to results if the match hasn't been added yet (will trigger twice for duplicate, we only want one notification)
+				if (matches > 1)
+					if (!results.ToLower().Contains(item.Name.ToLower()))
+						results += $"{item.Name}&";
+			}
+
+			return results;
+		}
+
+		// If we're calling this, then we'll gather up info on settings that are related to
+		// common issues, and see if there's a problem we can find
 		public void CheckSPPConfig()
 		{
-			// We don't care about actual SPP config files, only our active collections
-			// since we export to overwrite those with settings from this app
+			// Prep our collections in case there's nothing in current settings
+			FindConfigPaths();
+			if (BnetCollection == null || BnetCollection.Count == 0)
+			{
+				BnetCollection = BnetCollectionTemplate;
+				Log("Current Bnet settings were empty, applying defaults");
+			}
+			if (WorldCollection == null || WorldCollection.Count == 0)
+			{
+				WorldCollection = WorldCollectionTemplate;
+				Log("Current World settings were empty, applying defaults");
+			}
+
+			// Setup our values to test later
 			string buildFromDB = MySqlManager.MySQLQuery(@"SELECT gamebuild FROM realmlist WHERE id = 1");
-			string buildFromWorld = string.Empty;
-			string buildFromBnet = string.Empty;
-			string loginRESTExternalAddress = string.Empty;
-			string loginRESTLocalAddress = string.Empty;
+			string buildFromWorld = GetValueFromCollection(WorldCollection, "Game.Build.Version");
+			string buildFromBnet = GetValueFromCollection(BnetCollection, "Game.Build.Version");
+			string loginRESTExternalAddress = GetValueFromCollection(BnetCollection, "LoginREST.ExternalAddress");
+			string loginRESTLocalAddress = GetValueFromCollection(BnetCollection, "LoginREST.LocalAddress");
 			string addressFromDB = MySqlManager.MySQLQuery(@"SELECT address FROM realmlist WHERE id = 1");
 			string localAddressFromDB = MySqlManager.MySQLQuery(@"SELECT localAddress FROM realmlist WHERE id = 1");
 			string wowConfigPortal = string.Empty;
-			string wowConfigFile = string.Empty;
-			string bnetBindIP = string.Empty;
-			string worldBindIP = string.Empty;
+			string bnetBindIP = GetValueFromCollection(BnetCollection, "BindIP");
+			string worldBindIP = GetValueFromCollection(WorldCollection, "BindIP");
 			string result = string.Empty;
-			bool solocraft = false;
-			bool flexcraftHealth = false;
-			bool flexcraftUnitMod = false;
-			bool flexcraftCombatRating = false;
+			bool solocraft = IsOptionEnabled(WorldCollection, "Solocraft.Enable");
+			bool flexcraftHealth = IsOptionEnabled(WorldCollection, "HealthCraft.Enable");
+			bool flexcraftUnitMod = IsOptionEnabled(WorldCollection, "UnitModCraft.Enable");
+			bool flexcraftCombatRating = IsOptionEnabled(WorldCollection, "Combat.Rating.Craft.Enable");
+			bool bpay = IsOptionEnabled(WorldCollection, "Bpay.Enabled");
+			bool purchaseShop = IsOptionEnabled(WorldCollection, "Purchase.Shop.Enabled");
+			bool battleCoinVendor = IsOptionEnabled(WorldCollection, "Battle.Coin.Vendor.Enable");
+			bool battleCoinVendorCustom = IsOptionEnabled(WorldCollection, "Battle.Coin.Vendor.Custom.Enable");
+			bool gridUnload = IsOptionEnabled(WorldCollection, "GridUnload");
+			bool baseMapLoadAllGrids = IsOptionEnabled(WorldCollection, "BaseMapLoadAllGrids");
+			bool instanceMapLoadAllGrids = IsOptionEnabled(WorldCollection, "InstanceMapLoadAllGrids");
 
-			// Populate from world collection
-			foreach (var item in WorldCollection)
-			{
-				if (item.Name.Contains("Game.Build.Version"))
-					buildFromWorld = item.Value;
-				if (item.Name.Contains("BindIP"))
-					worldBindIP = item.Value;
-			}
-
-			// Populate from Bnet collection
-			foreach (var item in BnetCollection)
-			{
-				if (item.Name.Contains("Game.Build.Version"))
-					buildFromBnet = item.Value;
-				if (item.Name.Contains("BindIP"))
-					bnetBindIP = item.Value;
-				if (item.Name.Contains("LoginREST.LocalAddress"))
-					loginRESTLocalAddress = item.Value;
-				if (item.Name.Contains("LoginREST.ExternalAddress"))
-					loginRESTExternalAddress = item.Value;
-			}
-
-			// Compare bnet to default - any missing/extra items?
-			result += "\nChecking Bnet config compared to template...\n";
-
-			foreach (var item in BnetCollectionTemplate)
-			{
-				if (CheckCollectionForMatch(BnetCollection, item.Name) == false)
-				{
-					result += $"Alert - [{item.Name}] exists in Bnet-Template, but not in current settings. Adding entry (will need to save/export afterwards to save)\n";
-					BnetCollection.Add(item);
-				}
-			}
-
-			foreach (var item in BnetCollection)
-				if (CheckCollectionForMatch(BnetCollectionTemplate, item.Name) == false)
-					result += $"Alert - [{item.Name}] exists in current Bnet settings, but not in template. Please verify whether this entry is needed any longer.\n";
-
-
-			// Compare world to default - any missing/extra items?
-			result += "\nChecking World config compared to template...\n";
-
-			foreach (var item in WorldCollectionTemplate)
-			{
-				if (CheckCollectionForMatch(WorldCollection, item.Name) == false)
-				{
-					result += $"Alert - [{item.Name}] exists in World-Template, but not in current settings. Adding entry (will need to save/export afterwards to save)\n";
-					WorldCollection.Add(item);
-				}
-			}
-
-			foreach (var item in WorldCollection)
-				if (CheckCollectionForMatch(WorldCollectionTemplate, item.Name) == false)
-					result += $"Alert - [{item.Name}] exists in current World settings, but not in template. Please verify whether this entry is needed any longer.\n";
-
-			// Compare build# between bnet/world/realm
-			result += $"\nBuild from DB Realm - {buildFromDB}\n";
-			result += $"Build from WorldConfig - {buildFromWorld}\n";
-			result += $"Build from BnetConfig - {buildFromBnet}\n";
-			if (buildFromBnet != buildFromDB || buildFromBnet != buildFromWorld)
-				result += "Alert - There is a [Game.Build.Version] mismatch between configs and database. Please use the \"Set Build\" button to fix, then save/export.\n";
-
-
-			// Compare IP bindings
-			result += $"\nWorld BindIP - {worldBindIP}\n";
-			result += $"Bnet BindIP - {bnetBindIP}\n";
-			if (!worldBindIP.Contains("0.0.0.0") || !bnetBindIP.Contains("0.0.0.0"))
-				result += "Alert - Both World and Bnet BindIP setting should be \"0.0.0.0\"\n";
-
-
-			// Compare listening IPs between bnet/world/realm/wow config
-			result += $"\nLoginREST.ExternalAddress - {loginRESTExternalAddress}\n";
-			result += $"Address from DB Realm - {addressFromDB}\n";
-
-			// Gather WoW portal IP from config.wtf
-			wowConfigFile = GetWowConfigFile();
-
-			if (wowConfigFile == string.Empty)
-				Log("WOW Config File cannot be found - cannot parse SET portal entry");
+			// If we just applied defaults, and there's still nothing, then something went wrong... missing templates?
+			if (BnetCollection.Count == 0 || WorldCollection.Count == 0)
+				Log("Alert - There's an issue with collection(s) being empty.. possibly missing template files");
 			else
 			{
-				// Pull in our WOW config
-				List<string> allLinesText = File.ReadAllLines(wowConfigFile).ToList();
+				// Compare bnet to default - any missing/extra items?
+				result += "\nChecking Bnet config compared to template...\n";
 
-				foreach (var item in allLinesText)
+				foreach (var item in BnetCollectionTemplate)
 				{
-					// If it's the portal entry, process further
-					// split by " and 2nd item will be IP
-					if (item.Contains("SET portal"))
+					if (CheckCollectionForMatch(BnetCollection, item.Name) == false)
 					{
-						string[] phrase = item.Split('"');
-						wowConfigPortal = phrase[1];
-						result += $"WoW config.wtf Set Portal IP - {wowConfigPortal}\n";
+						result += $"Warning - [{item.Name}] exists in Bnet-Template, but not in current settings. Adding entry (will need to save/export afterwards to save)\n";
+						BnetCollection.Add(item);
 					}
 				}
+
+				// Check existing bnet entries, and see if the template has it. If not, could be an issue
+				foreach (var item in BnetCollection)
+					if (CheckCollectionForMatch(BnetCollectionTemplate, item.Name) == false)
+						result += $"Warning - [{item.Name}] exists in current Bnet settings, but not in template. Please verify whether this entry is needed any longer.\n";
+
+				// Compare world to default - any missing/extra items
+				result += "\nChecking World config compared to template...\n";
+
+				foreach (var item in WorldCollectionTemplate)
+				{
+					if (CheckCollectionForMatch(WorldCollection, item.Name) == false)
+					{
+						result += $"Warning - [{item.Name}] exists in World-Template, but not in current settings. Adding entry (will need to save/export afterwards to save)\n";
+						WorldCollection.Add(item);
+					}
+				}
+
+				// Check existing world entries, see if anything exists that isn't in the template.
+				foreach (var item in WorldCollection)
+					if (CheckCollectionForMatch(WorldCollectionTemplate, item.Name) == false)
+						result += $"Warning - [{item.Name}] exists in current World settings, but not in template. Please verify whether this entry is needed any longer.\n";
+
+				// Compare build# between bnet/world/realm
+				result += $"\nBuild from DB Realm - {buildFromDB}\n";
+				result += $"Build from WorldConfig - {buildFromWorld}\n";
+				result += $"Build from BnetConfig - {buildFromBnet}\n";
+				if (buildFromBnet != buildFromDB || buildFromBnet != buildFromWorld)
+					result += "Alert - There is a [Game.Build.Version] mismatch between configs and database. Please use the \"Set Build\" button to fix, then save/export.\n";
+				else
+					result += "Build numbers match, this is good!\n";
+
+				// Compare IP bindings for listening - these really never need to change
+				result += $"\nWorld BindIP - {worldBindIP}\n";
+				result += $"Bnet BindIP - {bnetBindIP}\n";
+				if (!worldBindIP.Contains("0.0.0.0") || !bnetBindIP.Contains("0.0.0.0"))
+					result += "Alert - Both World and Bnet BindIP setting should be \"0.0.0.0\"\n";
+				else
+					result += "BindIP settings match and are set properly.\n";
+
+				// List our external/hosting IP settings
+				result += $"\nLoginREST.ExternalAddress - {loginRESTExternalAddress}\n";
+				result += $"Address from DB Realm - {addressFromDB}\n";
+
+				// Gather WoW portal IP from config.wtf
+				if (File.Exists(WowConfigFile) == false)
+				{
+					Log("WOW Config File cannot be found - cannot parse SET portal entry");
+					result += "Alert - WOW Config file not found, cannot check [SET portal] entry to compare.\n";
+				}
+				else
+				{
+					// Pull in our WOW config
+					List<string> allLinesText = File.ReadAllLines(WowConfigFile).ToList();
+
+					if (allLinesText.Count < 2)
+						Log($"Alert - WoW Client config file [{WowConfigFile}] may be empty.");
+
+					foreach (var item in allLinesText)
+					{
+						// If it's the portal entry, process further
+						// split by " and 2nd item will be IP
+						if (item.Contains("SET portal"))
+						{
+							string[] phrase = item.Split('"');
+							wowConfigPortal = phrase[1];
+							result += $"WoW config.wtf Set Portal IP - {wowConfigPortal}\n";
+						}
+					}
+				}
+
+				// From above, the external/hosting address listed in each of these entries
+				// need to match. If not, there will be potential issues connecting to the realm
+				if (loginRESTExternalAddress != addressFromDB || loginRESTExternalAddress != wowConfigPortal)
+					result += "Alert - All of these addresses should match. Set these to the Local/LAN/WAN IP depending on hosting goals.\n";
+				else
+					result += "IP settings for hosting all match, this is good!\n";
+
+				// Check the local (not external hosting) IP settings. These don't need to change from 127.0.0.1 (localhost)
+				result += $"\nLoginREST.LocalAddress - {loginRESTLocalAddress}\n";
+				result += $"local Address from DB - {localAddressFromDB}\n";
+				if (!loginRESTLocalAddress.Contains("127.0.0.1") || !localAddressFromDB.Contains("127.0.0.1"))
+					result += "Alert - both of these addresses should match, and probably both be set to 127.0.0.1\n";
+				else
+					result += "Local address entries are set properly.\n";
+
+				// Check our solocraft settings compared to FlexCraft entries
+				// If both are enabled, this is a problem
+				if (solocraft)
+				{
+					if (flexcraftHealth)
+						result += "\nAlert - Solocraft and HealthCraft are both enabled! This will cause conflicts. Disabling Solocraft recommended.\n";
+
+					if (flexcraftUnitMod)
+						result += "\nAlert - Solocraft and UnitModCraft are both enabled! This will cause conflicts. Disabling Solocraft recommended.\n";
+
+					if (flexcraftCombatRating)
+						result += "\nAlert - Solocraft and Combat.Rating.Craft are both enabled! This will cause conflicts. Disabling Solocraft recommended.\n";
+				}
+
+				// Check for battle shop entries
+				if (bpay != purchaseShop)
+					result += $"\nAlert - Bpay.Enabled is {bpay}, and Purchase.Shop.Enabled is {purchaseShop} - both should either be disabled or enabled together.\n";
+
+				// check for both battlecoin.vendor.enable and battlecoin.vendor.custom.enable (should only be 1 enabled)
+				if (battleCoinVendor && battleCoinVendorCustom)
+					result += $"\nAlert - Battle.Coin.Vendor.Enable is {battleCoinVendor}, and Battle.Coin.Vendor.CUSTOM.Enable is {battleCoinVendorCustom} - only one needs enabled.\n";
+
+				// Warn about grid related settings
+				if (baseMapLoadAllGrids || instanceMapLoadAllGrids)
+					result += "\nWarning - BaseMapLoadAllGrids and InstanceMapLoadAllGrids should be set to 0. If the worldserver crashes on loading maps or runs out of memory, this may be why.\n";
+				if (gridUnload == false)
+					result += $"\nWarning - GridUnload should be set to 1 to unload unused map grids and release memory. If the server runs out of memory, or crashes with high usage, this may be why.\n";
+
+				// Check collections for duplicate entries, and strip out the &
+				// at the end of the string. This will leave the final as listing
+				// [entry1&entry2&entry3] for the feedback
+				result += "\n\nChecking for duplicates in world/bnet config\n";
+				string tmp1 = CheckCollectionForDuplicates(BnetCollection).TrimEnd('&');
+				string tmp2 = CheckCollectionForDuplicates(WorldCollection).TrimEnd('&');
+
+				// If there were duplicates, list them
+				if (tmp1 != string.Empty)
+					result += $"\nAlert - Duplicate entries found in [BnetConfig] for [{tmp1}]\n";
+				if (tmp2 != string.Empty)
+					result += $"\nAlert - Duplicate entries found in [WorldConfig] for [{tmp2}]\n";
+
+				// Build our final response based on any alert/warnings found
+				if (result.Contains("Alert"))
+					result += "\n\nAlert - Issues were found!";
+				else if (result.Contains("Warning"))
+					result += "\n\nWarnings were found, this could impact server stability or performance and those settings may need changed.\n\n";
+				else
+					result += "\n\nNo known problems were found!";
+
+				// Take our final list of results and send to the user
+				MessageBox.Show(result);
 			}
-
-			if (loginRESTExternalAddress != addressFromDB || loginRESTExternalAddress != wowConfigPortal)
-				result += "Alert - All of these addresses should match. Set these to the Local/LAN/WAN IP depending on hosting goals.\n";
-
-			result += $"\nLoginREST.LocalAddress - {loginRESTLocalAddress}\n";
-			result += $"local Address from DB - {localAddressFromDB}\n";
-			if (!loginRESTLocalAddress.Contains("127.0.0.1") || !localAddressFromDB.Contains("127.0.0.1"))
-				result += "Alert - both of these addresses should match, and probably both be set to 127.0.0.1\n";
-
-
-			// Check if solo/flexcraft both enabled
-			foreach (var item in WorldCollection)
-			{
-				if (item.Name == "Solocraft.Enable" && item.Value == "1")
-					solocraft = true;
-				if (item.Name == "HealthCraft.Enable" && item.Value == "1")
-					flexcraftHealth = true;
-				if (item.Name == "UnitModCraft.Enable" && item.Value == "1")
-					flexcraftUnitMod = true;
-				if (item.Name == "Combat.Rating.Craft.Enable" && item.Value == "1")
-					flexcraftCombatRating = true;
-			}
-
-			if (solocraft)
-			{
-				if (flexcraftHealth)
-					result += "\nAlert - Solocraft and HealthCraft are both enabled! This will cause conflicts. Disabling Solocraft recommended.\n";
-
-				if (flexcraftUnitMod)
-					result += "\nAlert - Solocraft and UnitModCraft are both enabled! This will cause conflicts. Disabling Solocraft recommended.\n";
-
-				if (flexcraftCombatRating)
-					result += "\nAlert - Solocraft and Combat.Rating.Craft are both enabled! This will cause conflicts. Disabling Solocraft recommended.\n";
-			}
-
-			// Warn if VAS enabled?
-
-			// Anything else?
-			if (result.Contains("Alert"))
-				result += "\nAlert - Issues were found!";
-			else
-				result += "\nNo known problems were found!";
-			MessageBox.Show(result);
 		}
 
+		// From hitting the SPP Browse button in settings tab
 		public void SPPFolderBrowse()
 		{
-			SPPFolderLocation = BrowseFolder();
+			// If it's empty, then it was cancelled and we keep the old setting
+			string tmp = BrowseFolder();
+			if (tmp != string.Empty)
+				SPPFolderLocation = tmp;
 		}
 
+		// From hitting the Wow browse button in settings tab
 		public void WowConfigBrowse()
 		{
-			WOWConfigLocation = BrowseFolder();
+			// If it's empty, then it was cancelled and we keep the old setting
+			string tmp = BrowseFolder();
+			if (tmp != string.Empty)
+				WOWConfigLocation = tmp;
 		}
 
+		// Method to browse to a folder
 		public string BrowseFolder()
 		{
 			const string baseFolder = @"C:\";
@@ -319,162 +454,115 @@ namespace SPP_Config_Generator
 				VistaFolderBrowserDialog dialog = new VistaFolderBrowserDialog();
 				dialog.Description = "Please select a folder.";
 				dialog.UseDescriptionForTitle = true; // This applies to the Vista style dialog only, not the old dialog.
-				dialog.SelectedPath = baseFolder; // place to start search				
+				dialog.SelectedPath = baseFolder; // place to start search
 				if ((bool)dialog.ShowDialog())
 					result = dialog.SelectedPath;
-
 			}
 			catch { return string.Empty; }
+
 			return result;
 		}
 
-		public async void SaveConfig()
+		// Take a collection, parse it out and save to a file path
+		public async void BuildConfFile(BindableCollection<ConfigEntry> collection, string path)
 		{
-			string worldConfigFile = string.Empty;
-			string bnetConfigFile = string.Empty;
-			string tmpstr = string.Empty;
 			int count = 0;
+			string tmpstr = string.Empty;
 
-			// This should save general settings, and also current configs for world/bnet
+			foreach (var item in collection)
+			{
+				count++;
+
+				// Update status every x entries, otherwise it slows down
+				// too much if we update the status box every time
+				if (count % 5 == 0)
+				{
+					StatusBox = $"Updating {path} row {count} of {collection.Count}";
+
+					// Let our UI update
+					await Task.Delay(1);
+				}
+
+				// Our description may be empty for this entry, so only process
+				// it if it has something in it and add to the temp string
+				if (item.Description.Length > 1)
+					tmpstr += item.Description;
+
+				// If we have data for a setting entry, then add it
+				// to the temp string. Every setting = value entry
+				// will end in a new line
+				if (item.Name.Length > 1 && item.Value.Length > 0)
+					tmpstr += $"{item.Name} = {item.Value}\n";
+			}
+
+			// flush to file, now that we've finished processing
+			ExportToFile(path, tmpstr, false);
+
+			// Clear our statusbox once we're done
+			StatusBox = "";
+		}
+
+		// We're going to take the WOW config file and save, as well as
+		// bnetserver.conf and worldserver.conf files based on our settings
+		// in the current collections
+		public void SaveConfig()
+		{
+			// Make sure our conf file locations are up to date in case folder changed in settings
+			FindConfigPaths();
+
+			// This should save general settings
 			if (GeneralSettingsManager.GeneralSettings == null)
 				Log("General Settings are empty, cannot save");
 			else
 				if (!GeneralSettingsManager.SaveSettings(GeneralSettingsManager.SettingsPath, GeneralSettingsManager.GeneralSettings))
 				Log($"Exception saving file {GeneralSettingsManager.SettingsPath}");
 
-			if (WorldCollection == null || WorldCollection.Count == 0)
-				Log("Cannot save WorldConfig, current settings are empty");
-			else
-				if (!GeneralSettingsManager.SaveSettings(GeneralSettingsManager.WorldConfigPath, WorldCollection))
-				Log($"Exception saving file {GeneralSettingsManager.WorldConfigPath}");
-
-			if (BnetCollection == null || BnetCollection.Count == 0)
-				Log("Cannot save BnetConfig, current settings are empty");
-			else
-				if (!GeneralSettingsManager.SaveSettings(GeneralSettingsManager.BNetConfigPath, BnetCollection))
-				Log($"Exception saving file {GeneralSettingsManager.BNetConfigPath}");
-
-			// Run config checks function (will report non-matching build, IPs, etc)
-
-			// Find our actual config folder for SPP
-			if (File.Exists($"{SPPFolderLocation}\\Servers\\bnetserver.conf"))
-				bnetConfigFile = $"{SPPFolderLocation}\\Servers\\bnetserver.conf";
-			if (File.Exists($"{SPPFolderLocation}\\bnetserver.conf"))
-				bnetConfigFile = $"{SPPFolderLocation}\\bnetserver.conf";
-			if (File.Exists($"{SPPFolderLocation}\\Servers\\worldserver.conf"))
-				worldConfigFile = $"{SPPFolderLocation}\\Servers\\worldserver.conf";
-			if (File.Exists($"{SPPFolderLocation}\\worldserver.conf"))
-				worldConfigFile = $"{SPPFolderLocation}\\worldserver.conf";
-
-			// Export to BNET
-			if (bnetConfigFile == string.Empty)
+			// Export to bnetserver.conf
+			if (BnetConfFile == string.Empty)
 				Log("BNET Export -> Config File cannot be found");
 			else
 			{
-				count = 0;
-				tmpstr = "################################################\n";
-				tmpstr += "# Trinity Core Auth Server configuration file #\n";
-				tmpstr += "################################################\n";
-				tmpstr += "[bnetserver]\n\n";
-
-				foreach (var item in BnetCollection)
+				if (BnetCollection == null || BnetCollection.Count == 0)
+					Log("BNET Export -> Current settings are empty");
+				else
 				{
-					count++;
-					StatusBox = $"Updating BNET row {count} of {BnetCollection.Count}";
-
-					// Let our UI update
-					await Task.Delay(1);
-
-					// Make sure our description starts with #
-					if (!item.Description.StartsWith("#") && item.Description.Length > 1)
-						tmpstr += "# ";
-					if (item.Description.Length > 1)
-						tmpstr += item.Description + "\n";
-					if (item.Name.Length > 1 && item.Value.Length > 0)
-						tmpstr += $"{item.Name} = {item.Value}\n\n";
+					// Wow config relies on bnet external address, so we
+					// only want to process this if the bnet collection
+					// has something in it
+					UpdateWowConfig();
+					BuildConfFile(BnetCollection, BnetConfFile);
 				}
-
-				// flush to file
-				ExportToConfig(bnetConfigFile, tmpstr, false);
 			}
 
-			// Export to World - config starts with [worldserver]
-			if (worldConfigFile == string.Empty)
+			// Export to worldserver.conf
+			if (WorldConfFile == string.Empty)
 				Log("WORLD Export -> Config File cannot be found");
 			else
 			{
-				count = 0;
-				tmpstr = "################################################\n";
-				tmpstr += "# Trinity Core World Server configuration file #\n";
-				tmpstr += "################################################\n";
-				tmpstr += "[worldserver]\n\n";
-
-				foreach (var item in WorldCollection)
-				{
-					count++;
-					StatusBox = $"Updating WORLD row {count} of {WorldCollection.Count}";
-
-					// Let our UI update
-					await Task.Delay(1);
-
-					// Make sure our description starts with #
-					if (!item.Description.StartsWith("#") && item.Description.Length > 1)
-						tmpstr += "# ";
-					if (item.Description.Length > 1)
-						tmpstr += item.Description + "\n";
-					if (item.Name.Length > 1 && item.Value.Length > 0)
-						tmpstr += $"{item.Name} = {item.Value}\n\n";
-				}
-
-				// flush to file
-				ExportToConfig(worldConfigFile, tmpstr, false);
+				if (WorldCollection == null || WorldCollection.Count == 0)
+					Log("WORLD Export -> Current settings are empty");
+				else
+					BuildConfFile(WorldCollection, WorldConfFile);
 			}
-
-			UpdateWowConfig();
-			StatusBox = "Export Complete";
 		}
 
-		public string GetWowConfigFile()
-		{
-			string wowConfigFile = string.Empty;
-
-			// Find the exact file we need
-			if (File.Exists($"{WOWConfigLocation}\\WTF\\config.wtf"))
-				wowConfigFile = $"{WOWConfigLocation}\\WTF\\config.wtf";
-
-			if (File.Exists($"{WOWConfigLocation}\\config.wtf"))
-				wowConfigFile = $"{WOWConfigLocation}\\config.wtf";
-
-			return wowConfigFile;
-		}
-
-		public async void UpdateWowConfig()
+		// Take our wow config.wtf file and update the SET portal entry
+		public void UpdateWowConfig()
 		{
 			string tmpstr = string.Empty;
-			string wowConfigFile = string.Empty;
-			int count = 0;
 
-			// Update config.wtf for WoW installation			
-			wowConfigFile = GetWowConfigFile();
-
-			if (wowConfigFile == string.Empty)
+			if (WowConfigFile == string.Empty)
 				Log("WOW Config File cannot be found - cannot update SET portal entry");
 			else
 			{
-				count = 0;
 				// Pull in our WOW config
-				List<string> allLinesText = File.ReadAllLines(wowConfigFile).ToList();
-				tmpstr = string.Empty;
+				List<string> allLinesText = File.ReadAllLines(WowConfigFile).ToList();
 
 				foreach (var item in allLinesText)
 				{
-					count++;
-					StatusBox = $"Updating WOWCONFIG row {count} of {allLinesText.Count}";
-
-					// Let our UI update
-					await Task.Delay(1);
-
 					// If it's the portal entry, set it to the external address
+					// and if there's something wrong with the file then nothing
+					// would change anyways
 					if (item.Contains("SET portal"))
 						foreach (var entry in BnetCollection)
 						{
@@ -488,12 +576,32 @@ namespace SPP_Config_Generator
 				}
 
 				// flush the temp string to file, overwrite
-				ExportToConfig(wowConfigFile, tmpstr, false);
+				ExportToFile(WowConfigFile, tmpstr, false);
+				StatusBox = "";
 			}
 		}
 
-		public void ExportToConfig(string path, string entry, bool append = true)
+		// Take our incoming file path, and the full formatted string (config)
+		// that we want to save, and flush to the file
+		public void ExportToFile(string path, string entry, bool append = true)
 		{
+			try
+			{
+				// Determine filename and backup existing before overwrite
+				string[] pathArray = path.Split('\\');
+
+				// Format our backup file name with the date/time
+				string backupFile = $"Backup Configs\\{DateTime.Now.ToString("yyyyMMdd_hhmmss")}.{pathArray[pathArray.Length - 1]}";
+				Log($"Backing up {path} to {backupFile}");
+
+				// Make a copy of the file we're overwriting, 
+				// to the backup file name we just set
+				File.Copy(path, backupFile);
+			}
+			catch (Exception e) { Log($"Error backing up to {path}, exception {e.ToString()}"); }
+
+			// Now we should have a backup, and take the incoming string entry
+			// and flush it to the file path, overwriting
 			using (StreamWriter stream = new StreamWriter(path, append))
 			{
 				try
@@ -505,56 +613,103 @@ namespace SPP_Config_Generator
 			}
 		}
 
-		public void LoadSettings()
+		// Load in our saved settings (settings.json, SPP server config)
+		public async void LoadSettings()
 		{
+			StatusBox = "Please wait, loading general settings...";
 			// Pull in the saved settings, if any
 			Log("Loading general settings");
 			GeneralSettingsManager.LoadGeneralSettings();
 
-			// load up templates
-			Log("Loading World/Bnet templates");
-			WorldCollectionTemplate = GeneralSettingsManager.LoadSettings(GeneralSettingsManager.WorldTemplatePath);
-			BnetCollectionTemplate = GeneralSettingsManager.LoadSettings(GeneralSettingsManager.BNetTemplatePath);
-			Log("Loading World/Bnet saved settings");
-			WorldCollection = GeneralSettingsManager.LoadSettings(GeneralSettingsManager.WorldConfigPath);
-			BnetCollection = GeneralSettingsManager.LoadSettings(GeneralSettingsManager.BNetConfigPath);
+			// This await should let the GUI size/position settings apply before moving forward
+			await Task.Delay(1);
+			FindConfigPaths();
 
-			if (WorldCollectionTemplate == null)
-				Log($"WorldTemplate is null, error loading file {GeneralSettingsManager.WorldTemplatePath}");
-			if (BnetCollectionTemplate == null)
-				Log($"BnetTemplate is null, error loading file {GeneralSettingsManager.BNetTemplatePath}");
-			if (WorldCollection == null)
-				Log($"WorldConfig is null, error loading file {GeneralSettingsManager.WorldConfigPath} -- if no configuration has been made, please hit the [Set Defaults] and [Save/Export]");
-			if (BnetCollection == null)
-				Log($"BnetConfig is null, error loading file {GeneralSettingsManager.BNetConfigPath} -- if no configuration has been made, please hit the [Set Defaults] and [Save/Export]");
+			// Pull in the default templates if they exist
+			Log("Loading World/Bnet default templates");
+			StatusBox = "Please wait, loading bnet template...";
+			await Task.Delay(1);
+			BnetCollectionTemplate = GeneralSettingsManager.CreateCollectionFromConfigFile("Default Templates\\bnetserver.conf");
+
+			StatusBox = "Please wait, loading world template...";
+			await Task.Delay(1);
+			WorldCollectionTemplate = GeneralSettingsManager.CreateCollectionFromConfigFile("Default Templates\\worldserver.conf");
+
+			// Pull in the SPP server configs, if the location is set correctly
+			// in the general settings tab
+			Log("Loading current World/Bnet config files");
+			StatusBox = "Please wait, loading current bnetserver.conf...";
+			await Task.Delay(1);
+			BnetCollection = GeneralSettingsManager.CreateCollectionFromConfigFile(BnetConfFile);
+
+			StatusBox = "Please wait, loading current worldserver.conf...";
+			await Task.Delay(1);
+			WorldCollection = GeneralSettingsManager.CreateCollectionFromConfigFile(WorldConfFile);
+
+			// Clear our status box, alert of any issues
+			StatusBox = "";
+			if (WorldCollectionTemplate.Count == 0)
+				Log("WorldCollectionTemplate is empty, error loading file worldserver.conf");
+			if (BnetCollectionTemplate.Count == 0)
+				Log("BnetCollectionTemplate is empty, error loading file bnetserver.conf");
+			if (WorldCollection.Count == 0)
+				Log($"WorldConfig is empty, error loading file {WorldConfFile} -- if no configuration has been made, please hit the [Set Defaults] and [Save/Export]");
+			if (BnetCollection.Count == 0)
+				Log($"BnetConfig is empty, error loading file {BnetConfFile} -- if no configuration has been made, please hit the [Set Defaults] and [Save/Export]");
+
+			// If the SPP folder or wow client location was empty, assume this is the first time running or
+			// that something was deleted. Either way, user needs to know.
+			if (SPPFolderLocation == string.Empty || WowConfigFile == string.Empty)
+			{
+				string tmp = "Hello! The location for either SPP folder or WOW config doesn't seem to be set, so if this is your first time running this app ";
+				tmp += "then please go to the General App Settings tab and browse to the folder locations, then reload configs. From there you can ";
+				tmp += "check the config and make any adjustments, then save/export when ready. Click the [Help/About] button for more details.";
+				MessageBox.Show(tmp, "Settings Need Attention!");
+			}
 		}
 
-		public void Log(string log) { LogText = ":> " + log + "\n" + LogText; }
-
-		public void PopulateHelp()
+		// Take the folder locations in settings, and try to determine the path for each config file
+		public void FindConfigPaths()
 		{
-			HelpAbout += "This tool helps build working World and Bnet server config files without duplicate entries. This can also be used to check your configuration ";
-			HelpAbout += "for any known issues. There are some things to be aware of -\n";
-			HelpAbout += "The MySQL server will probably error connecting unless you're running this on the same server. You should keep the MySQL server set to 127.0.0.1 and user/password ";
-			HelpAbout += "should be left to defaults. Delete the settings.json file to reset them.\n";
-			HelpAbout += "This tool can also update the config.wtf file in your WOW client configuration to make sure it matches with the rest of the configuration, assuming that ";
-			HelpAbout += "this tool can access the folder/file. If you run your WOW Client from another PC, then you may need to set this manually to match the [LoginREST.ExternalAddress] ";
-			HelpAbout += "from the Bnet Config, otherwise you may have trouble with your WOW client contacting the server. You can find this entry in your Bnet Config.\n";
-			HelpAbout += "This tool can also set and check the [Game.Build.Version] between both configs and the database realm entry, and warn of any issues. Use the [Set Build] button ";
-			HelpAbout += "to set this entry if there is a discrepancy between them and your WOW client version. You can find the WOW client version by launching it and checking at the ";
-			HelpAbout += "bottom-left of the client at the login screen.\n";
-			HelpAbout += "Use the [Set IP] button to setup the external/lan/wan IP address in the Database entry for the realm, the Bnet config, and the WOW client (as much as it can ";
-			HelpAbout += "access from the computer the tool is running from). This will update the Database Realm entry and WOW config immediately. The rest won't update until Save/Export.\n";
-			HelpAbout += "Use the [Set Build] button to set the [Game.Build.Version] in both configs, and the realm database entry.\n";
-			HelpAbout += "If there is a problem, you can use the [Set Defaults] button to pull the wow config fresh from the local template files. This will overwrite all ";
-			HelpAbout += "previous settings for the Bnet and World config files. You'd need to set the [Game.Build.Version] again, and possibly the IP if hosting outside ";
-			HelpAbout += "of the local server.\n";
-			HelpAbout += "Use the [Check Config] button to run through some quick problem checks for common issues. Note - this may give errors connecting to MySQL ";
-			HelpAbout += "if this is running from another PC than the one the SPP Database Server runs on, and also make sure that the Database Server itself is running first. ";
-			HelpAbout += "Otherwise this tool cannot connect to the Database to check/update any settings there. If the error says similar to [not allowed to connect to this MySQL server] ";
-			HelpAbout += "then you're probably running this on a different computer. Run it from the SPP server (while the database server is running).\n";
-			HelpAbout += "Once you've finished making any changes, hit the [Save/Export] button to export the current settings to the bnetserver.conf and worldserver.conf files.\n";
-			HelpAbout += "Make sure to set the folders for your SPP LegionV2 folder, and your WOW Client folder in the [General App Settings] tab.";
+			// Find our world/bnet configs
+			if (SPPFolderLocation == string.Empty)
+				Log("SPP Folder Location is empty, cannot find existing settings to parse.");
+			else
+			{
+				if (File.Exists($"{SPPFolderLocation}\\worldserver.conf") || File.Exists($"{SPPFolderLocation}\\bnetserver.conf"))
+				{
+					WorldConfFile = $"{SPPFolderLocation}\\worldserver.conf";
+					BnetConfFile = $"{SPPFolderLocation}\\bnetserver.conf";
+				}
+				else if (File.Exists($"{SPPFolderLocation}\\Servers\\worldserver.conf") || File.Exists($"{SPPFolderLocation}\\Servers\\bnetserver.conf") || (Directory.Exists($"{SPPFolderLocation}\\Servers")))
+				{
+					// Either we find the files themselves, or we found the Servers folder and we'll generate them here on saving
+					// since this is the best guess given our saved path info
+					WorldConfFile = $"{SPPFolderLocation}\\Servers\\worldserver.conf";
+					BnetConfFile = $"{SPPFolderLocation}\\Servers\\bnetserver.conf";
+				}
+			}
+
+			// Find our wow client config
+			if (WOWConfigLocation == string.Empty)
+				Log("WOW Client Folder Location is empty, cannot find existing settings to parse.");
+			else
+			{
+				if (File.Exists($"{WOWConfigLocation}\\config.wtf"))
+					WowConfigFile = $"{WOWConfigLocation}\\config.wtf";
+				else if (File.Exists($"{WOWConfigLocation}\\WTF\\config.wtf") || (Directory.Exists($"{WOWConfigLocation}\\WTF")))
+					// Either we find the file, or we found the WTF folder and we'll assume this is it
+					// since this is the best guess given our saved path info. Won't be anything to parse, though
+					// if the file itself doesn't exist. Sad face...
+					WowConfigFile = $"{WOWConfigLocation}\\WTF\\config.wtf";
+			}
+		}
+
+		// take incoming string and append to the log. This will
+		// auto update the log on the right side through xaml binding
+		public void Log(string log)
+		{
+			LogText = ":> " + log + "\n" + LogText;
 		}
 	}
 }
