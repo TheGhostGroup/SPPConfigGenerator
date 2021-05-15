@@ -1,14 +1,13 @@
 ﻿using MySql.Data.MySqlClient;
 using System;
 
-namespace SPP_Config_Generator
+namespace SPP_LegionV2_Management
 {
 	public static class MySqlManager
 	{
 		// https://stackoverflow.com/questions/21618015/how-to-connect-to-mysql-database
 
 		private static string server;
-		private static string database = "legion_auth";
 		private static string user;
 		private static string password;
 		private static int port;
@@ -21,10 +20,38 @@ namespace SPP_Config_Generator
 			user = GeneralSettingsManager.GeneralSettings.MySQLUser;
 			password = GeneralSettingsManager.GeneralSettings.MySQLPass;
 			port = GeneralSettingsManager.GeneralSettings.MySQLPort;
-			connectionString = String.Format("server={0};port={1};user id={2}; password={3}; database={4};", server, port, user, password, database);
+			connectionString = String.Format("server={0};port={1};user id={2}; password={3};default command timeout=3600;", server, port, user, password);
 		}
 
-		public static string MySQLQuery(string query)
+		public static MySqlDataReader MySQLQuery(string query, Action<MySqlDataReader> loader)
+		{
+			UpdateConnectionInfo();
+
+			try
+			{
+				using (MySqlConnection connection = new MySqlConnection(connectionString))
+				{
+					connection.Open();
+
+					using (MySqlCommand cmd = connection.CreateCommand())
+					{
+						cmd.CommandText = query;
+						using (var reader = cmd.ExecuteReader())
+						{
+							while (reader.Read())
+							{
+								loader.Invoke(reader);
+							}
+						}
+					}
+				}
+			}
+			catch (Exception e) { Console.WriteLine($"SQL Exception {e.Message}\nQuery: {query}"); }
+
+			return null;
+		}
+
+		public static string MySQLQueryToString(string query, bool update = false)
 		{
 			UpdateConnectionInfo();
 			string response = string.Empty;
@@ -34,19 +61,31 @@ namespace SPP_Config_Generator
 				using (MySqlConnection connection = new MySqlConnection(connectionString))
 				{
 					connection.Open();
-					Console.WriteLine("connect");
+
 					using (var cmd = connection.CreateCommand())
 					{
 						cmd.CommandText = query;
-						using (var reader = cmd.ExecuteReader())
+						if (update)
+							response = $"{cmd.ExecuteNonQuery()} rows affected.";
+						else
 						{
-							while (reader.Read()) { }
-							response = reader.GetString(0);
+							using (var reader = cmd.ExecuteReader())
+							{
+								while (reader.Read()) { }
+								if (!reader.IsDBNull(0))
+									response = reader.GetString(0);
+								else
+									response = string.Empty;
+							}
 						}
 					}
 				}
 			}
-			catch (Exception ex) { return ex.Message.ToString(); }
+			catch (Exception e)
+			{
+				Console.WriteLine($"SQL exception, query = {query}");
+				return e.Message;
+			}
 
 			return response;
 		}

@@ -1,0 +1,158 @@
+﻿<UserControl x:Class="SPP_LegionV2_Management.ConfigGeneratorView"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+		xmlns:controls="clr-namespace:SPP_LegionV2_Management.Controls"
+		xmlns:Dialog="clr-namespace:MahApps.Metro.Controls.Dialogs;assembly=MahApps.Metro"
+		Dialog:DialogParticipation.Register="{Binding}" Background="Transparent"
+        xmlns:local="clr-namespace:SPP_LegionV2_Management"
+		xmlns:mah="http://metro.mahapps.com/winfx/xaml/controls"
+        mc:Ignorable="d">
+	<Grid Background="Transparent">
+		<Grid.ColumnDefinitions>
+			<!-- Whole app, probably not needed -->
+			<ColumnDefinition Width="*" />
+		</Grid.ColumnDefinitions>
+		<Grid.RowDefinitions>
+			<!-- Header/body row definition -->
+			<RowDefinition Height="auto" />
+			<RowDefinition Height="*" />
+		</Grid.RowDefinitions>
+		<!-- Stackpanel contains the buttons, searchbox -->
+		<StackPanel>
+			<StackPanel>
+				<WrapPanel Orientation="Horizontal" HorizontalAlignment="Center">
+
+					<!-- Top row of buttons -->
+					<Button x:Name="SetIP" Margin="5" MaxWidth="250"
+						local:EyeCandyForeGround.Image="/Resources/Buttons/SetIP.png"
+						Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
+						ToolTip="Set the listening/realm IP for the repack. This is for playing on a separate machine on the LAN or setting up the pack for internet connectivity. This will update the server config, DB and WoW Legion client config if able." />
+					<Button x:Name="SetBuild" Margin="5" MaxWidth="250"
+						local:EyeCandyForeGround.Image="/Resources/Buttons/SetBuild.png"
+						Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
+						ToolTip="Sets the Game.Build.Version in the config/database" />
+					<Button x:Name="SetDefaults" Margin="5" MaxWidth="350"
+						local:EyeCandyForeGround.Image="/Resources/Buttons/SetConfigsToDefault.png"
+						Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
+						ToolTip="Sets default entries in the SPP config. This will overwrite current settings from the local default template file." />
+					<Button x:Name="LoadSettings" Margin="5" MaxWidth="250"
+						local:EyeCandyForeGround.Image="/Resources/Buttons/ReloadConfigs.png"
+						Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
+						ToolTip="This reloads the Settings file, default templates and SPP world/bnet files from disk. This is helpful to undo any changes in the current session instead of restarting the app." />
+					<Button x:Name="CheckSPPConfig" Margin="5" MaxWidth="250"
+						local:EyeCandyForeGround.Image="/Resources/Buttons/CheckConfig.png"
+						Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
+						ToolTip="This will check the current SPP config for some potential issues." />
+					<Button x:Name="SaveConfig" Margin="5" MaxWidth="250"
+						local:EyeCandyForeGround.Image="/Resources/Buttons/ExportConfigs.png"
+						Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
+						ToolTip="Save settings and generate configs to SPP installation and database." />
+				</WrapPanel>
+			</StackPanel>
+
+			<!-- Search box and status box, above tabs -->
+			<TextBlock Text="Search Filter:" FontSize="14" />
+			<StackPanel Orientation="Horizontal">
+
+				<TextBox Width="200" HorizontalAlignment="Left" Margin="10,2"
+					Text="{Binding SearchBox, UpdateSourceTrigger=PropertyChanged}"
+					ToolTip="As you type this will update based on matching entries" />
+
+				<TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" Name="StatusBox" Margin="15,5" FontWeight="Bold" />
+			</StackPanel>
+		</StackPanel>
+
+		<!-- Main window area -->
+		<Border Grid.Column="0" Grid.Row="1" BorderThickness="2" BorderBrush="Black">
+			<Grid>
+				<Grid.ColumnDefinitions>
+					<ColumnDefinition Width="3*" />
+					<ColumnDefinition Width="5" />
+					<ColumnDefinition Width="*" />
+					<!-- Log -->
+				</Grid.ColumnDefinitions>
+
+				<!-- Main Window -->
+				<Grid Grid.Column="0">
+					<TabControl Background="Transparent" Margin="1" Style="{DynamicResource MahApps.Styles.TabControl.Animated}">
+						<TabControl.Resources>
+							<Style TargetType="TabItem" BasedOn="{StaticResource MahApps.Styles.TabItem}">
+								<Setter Property="mah:HeaderedControlHelper.HeaderFontSize" Value="18" />
+								<Setter Property="mah:HeaderedControlHelper.HeaderFontWeight" Value="Bold" />
+							</Style>
+						</TabControl.Resources>
+						<TabItem Header="World Config" Margin="1" Background="#353535">
+							<!-- Datagrid for World settings -->
+							<DataGrid Background="Transparent" 
+									ItemsSource="{Binding WorldView}" AutoGenerateColumns="False"
+									EnableColumnVirtualization="True" EnableRowVirtualization="True">
+								<!-- This sets up columns with the names we want,
+									without desccription column (which will become tooltip) -->
+								<DataGrid.Columns>
+									<DataGridTextColumn Header="Setting" Binding="{Binding Name}" />
+									<DataGridTextColumn Header="Value" Binding="{Binding Value}" MaxWidth="300" />
+								</DataGrid.Columns>
+								<DataGrid.ColumnHeaderStyle>
+									<Style TargetType="DataGridColumnHeader"  BasedOn="{StaticResource MahApps.Styles.DataGridColumnHeader}">
+										<Setter Property="Background" Value="Transparent" />
+										<Setter Property="FontWeight" Value="Bold" />
+									</Style>
+								</DataGrid.ColumnHeaderStyle>
+								<DataGrid.RowHeaderStyle>
+									<Style TargetType="DataGridRowHeader"  BasedOn="{StaticResource MahApps.Styles.DataGridRowHeader}">
+										<Setter Property="Background" Value="Transparent" />
+									</Style>
+								</DataGrid.RowHeaderStyle>
+								<DataGrid.RowStyle>
+									<Style TargetType="DataGridRow" BasedOn="{StaticResource MahApps.Styles.DataGridRow}">
+										<Setter Property="ToolTip" Value="{Binding Description}" />
+										<Setter Property="Background" Value="Transparent" />
+									</Style>
+								</DataGrid.RowStyle>
+							</DataGrid>
+						</TabItem>
+
+						<TabItem Header="Bnet Config" Margin="1" Background="#353535">
+							<!-- Datagrid for Bnet settings, duplicated from world collection -->
+							<DataGrid Background="Transparent"
+								ItemsSource="{Binding BnetView}" AutoGenerateColumns="False"
+								EnableColumnVirtualization="True" EnableRowVirtualization="True">
+								<DataGrid.Columns>
+									<DataGridTextColumn Header="Setting" Binding="{Binding Name}" />
+									<DataGridTextColumn Header="Value" Binding="{Binding Value}" />
+								</DataGrid.Columns>
+								<DataGrid.ColumnHeaderStyle>
+									<Style TargetType="DataGridColumnHeader"  BasedOn="{StaticResource MahApps.Styles.DataGridColumnHeader}">
+										<Setter Property="Background" Value="Transparent" />
+										<Setter Property="FontWeight" Value="Bold" />
+									</Style>
+								</DataGrid.ColumnHeaderStyle>
+								<DataGrid.RowHeaderStyle>
+									<Style TargetType="DataGridRowHeader"  BasedOn="{StaticResource MahApps.Styles.DataGridRowHeader}">
+										<Setter Property="Background" Value="Transparent" />
+									</Style>
+								</DataGrid.RowHeaderStyle>
+								<DataGrid.RowStyle>
+									<Style TargetType="DataGridRow" BasedOn="{StaticResource MahApps.Styles.DataGridRow}">
+										<Setter Property="ToolTip" Value="{Binding Description}" />
+										<Setter Property="Background" Value="Transparent" />
+									</Style>
+								</DataGrid.RowStyle>
+							</DataGrid>
+						</TabItem>
+					</TabControl>
+				</Grid>
+				<!-- Give us a movable splitter to adjust the size of the log if needed -->
+				<GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" />
+				<!-- Log -->
+				<Border Grid.Column="2" BorderThickness="2" BorderBrush="Black">
+					<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+						<TextBlock Text="{Binding LogText}" Margin="5" TextWrapping="Wrap" />
+					</ScrollViewer>
+				</Border>
+			</Grid>
+		</Border>
+	</Grid>
+</UserControl>

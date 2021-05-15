@@ -1,15 +1,11 @@
 ﻿using Caliburn.Micro;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
 
-namespace SPP_Config_Generator
+namespace SPP_LegionV2_Management
 {
 	/// <summary>
 	/// This class handles the general settings, save/load with files
@@ -18,6 +14,7 @@ namespace SPP_Config_Generator
 	{
 		public static GeneralSettings GeneralSettings { get; set; } = new GeneralSettings();
 		public static JObject SettingsJSON { get; set; }
+		public static bool IsMySQLRunning { get; set; }
 		public static string SettingsPath = "Settings.json";
 
 		// If the file doesn't exist, it will resort to defaults listed in the class itself
@@ -57,44 +54,46 @@ namespace SPP_Config_Generator
 
 			try
 			{
-				// Pull in our config
-				List<string> allLinesText = File.ReadAllLines(inFile).ToList();
-
-				// Process every text line in the file
-				foreach (var item in allLinesText)
+				// Pull in our config, process every text line in the file
+				foreach (var item in File.ReadAllLines(inFile).ToList())
 				{
 					// Check if comment or not
-					if (item.Contains("=") && item.StartsWith("#") == false)
+					if (item.Contains("=") && !item.StartsWith("#"))
 					{
 						// Split based on = sign
 						string[] strArray = item.Split('=');
 
-						// Now we should have 2 parts, the setting[0] and the value[1]
-						// and strip janky whitespace from the start/end so that we're
-						// left with a value and setting without extra space. This helps
-						// both comparing strings later, as well as the export of this
-						// collection back to disk
-						ConfigEntry entry = new ConfigEntry();
-						// Set our name (setting) without the whitespace
-						entry.Name = strArray[0].TrimStart(' ').TrimEnd(' ');
-						// Set our value of the name/setting without whitespace
-						entry.Value = strArray[1].TrimStart(' ').TrimEnd(' ');
-						// Remove any newline at the beginning of the description, and any
-						// trailing whitespace
-						entry.Description = tmpDescription.TrimStart('\n').TrimStart(' ').TrimEnd(' ');
+						// Now we should have 2 parts, the setting[0] and the value[1] and strip janky whitespace from the start/end
+						// so that we're left with a value and setting without extra space. This helps both comparing strings later,
+						// as well as the export of this collection back to disk
+						ConfigEntry entry = new ConfigEntry
+						{
+							// Set our name (setting) without the whitespace
+							Name = strArray[0].TrimStart(' ').TrimEnd(' '),
+
+							// Set our value of the name/setting without whitespace
+							Value = strArray[1].TrimStart(' ').TrimEnd(' '),
+
+							// Remove any extra whitespace
+							Description = tmpDescription.TrimStart(' ').TrimEnd(' ')
+						};
+
 						// Squirt our new entry into our temp collection
 						tempCollection.Add(entry);
 						tmpDescription = string.Empty; // reset our description
 					}
 					else
 					{
-						// If we're here, then the line doesn't have '=', so it's part of the description or other line
+						// If we're here, then the line is part of the description or other line
 						// so we'll keep adding to the tmpDescription until it's used/flushed to the collection
-						// when it matches a line with '=' in it. Since each time this happens, add a \n at the end
+						// when it matches a config entry. Since each time this happens, add a \n at the end
 						// so it will maintain visual continuity with the original .conf file when it exports
 						tmpDescription += item + "\n";
 					}
 				}
+				// Grab the last entry, which may be just a description
+				if (tmpDescription?.Length > 0)
+					tempCollection.Add(new ConfigEntry { Name = "", Value = "", Description = tmpDescription });
 			}
 			catch { return new BindableCollection<ConfigEntry>(); } // if something failed, then return a default blank collection
 
@@ -136,7 +135,7 @@ namespace SPP_Config_Generator
 	}
 
 	// This is the class for representing any single configuration entry for the WoW config
-	// A group of them will be put into a BindableCollection
+	// A group of them will be put into a List
 	public class ConfigEntry
 	{
 		public string Name { get; set; } = string.Empty;
@@ -145,95 +144,6 @@ namespace SPP_Config_Generator
 
 		public ConfigEntry()
 		{
-		}
-	}
-
-	// These are the classes to handle attached properties for the datagrid, which allows
-	// the search box to highlight matching entries, as well as auto-scroll to the first
-	// match that it finds
-	// Credit to sa_ddam213 @ Stackoverflow, without that I'd have never gotten this
-	// to work -- https://stackoverflow.com/questions/15467553/proper-datagrid-search-from-textbox-in-wpf-using-mvvm
-	public class SearchValueConverter : IMultiValueConverter
-	{
-		public object Convert(object[] values, Type targetType, object parameter, System.Globalization.CultureInfo culture)
-		{
-			string cellText = values[0] == null ? string.Empty : values[0].ToString();
-			string searchText = values[1] as string;
-
-			if (!string.IsNullOrEmpty(searchText) && !string.IsNullOrEmpty(cellText))
-			{
-				return cellText.ToLower().Contains(searchText.ToLower());
-			}
-			return false;
-		}
-
-		public object[] ConvertBack(object value, Type[] targetTypes, object parameter, System.Globalization.CultureInfo culture)
-		{
-			return null;
-		}
-	}
-
-	public static class DataGridTextSearch
-	{
-		// Using a DependencyProperty as the backing store for SearchValue.  This enables animation, styling, binding, etc...
-		public static readonly DependencyProperty SearchValueProperty =
-			DependencyProperty.RegisterAttached("SearchValue", typeof(string), typeof(DataGridTextSearch),
-				new FrameworkPropertyMetadata(string.Empty, FrameworkPropertyMetadataOptions.Inherits));
-
-		public static string GetSearchValue(DependencyObject obj)
-		{
-			return (string)obj.GetValue(SearchValueProperty);
-		}
-
-		public static void SetSearchValue(DependencyObject obj, string value)
-		{
-			obj.SetValue(SearchValueProperty, value);
-		}
-
-		// Using a DependencyProperty as the backing store for IsTextMatch.  This enables animation, styling, binding, etc...
-		public static readonly DependencyProperty IsTextMatchProperty =
-			DependencyProperty.RegisterAttached("IsTextMatch", typeof(bool), typeof(DataGridTextSearch), new UIPropertyMetadata(false));
-
-		public static bool GetIsTextMatch(DependencyObject obj)
-		{
-			return (bool)obj.GetValue(IsTextMatchProperty);
-		}
-
-		public static void SetIsTextMatch(DependencyObject obj, bool value)
-		{
-			obj.SetValue(IsTextMatchProperty, value);
-		}
-
-		// Using a DependencyProperty as the backing store for AutoScrollToSelectedRow.  This enables animation, styling, binding, etc...
-		public static readonly DependencyProperty AutoScrollToSelectedRowProperty =
-			DependencyProperty.RegisterAttached("AutoScrollToSelectedRow", typeof(bool), typeof(DataGridTextSearch)
-			, new UIPropertyMetadata(false, OnAutoScrollToSelectedRowChanged));
-
-		public static bool GetAutoScrollToSelectedRow(DependencyObject obj)
-		{
-			return (bool)obj.GetValue(AutoScrollToSelectedRowProperty);
-		}
-
-		public static void SetAutoScrollToSelectedRow(DependencyObject obj, bool value)
-		{
-			obj.SetValue(AutoScrollToSelectedRowProperty, value);
-		}
-
-		public static void OnAutoScrollToSelectedRowChanged(DependencyObject s, DependencyPropertyChangedEventArgs e)
-		{
-			var datagrid = s as DataGrid;
-			if (datagrid != null)
-			{
-				datagrid.IsSynchronizedWithCurrentItem = true;
-				datagrid.EnableRowVirtualization = !((bool)e.NewValue);
-				datagrid.SelectionChanged += (g, a) =>
-				{
-					if (datagrid.SelectedItem != null)
-					{
-						datagrid.ScrollIntoView(datagrid.SelectedItem);
-					}
-				};
-			}
 		}
 	}
 }
