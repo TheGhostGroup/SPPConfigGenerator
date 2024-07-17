@@ -18,17 +18,21 @@ namespace SPP_LegionV2_Management
 	{
 		// IDialogCoordinator is for metro message boxes
 		private readonly IDialogCoordinator _dialogCoordinator;
+
 		private bool _exportRunning = false;
+		private bool announcedClientConfig = false;
 
 		// These are the collections we'll be using, pulled from the Default Templates folder,
 		// or from the existing WoW installation if the folder is defined
 		public BindableCollection<ConfigEntry> WorldCollectionTemplate { get; set; } = new BindableCollection<ConfigEntry>();
+
 		public BindableCollection<ConfigEntry> BnetCollectionTemplate { get; set; } = new BindableCollection<ConfigEntry>();
 		public BindableCollection<ConfigEntry> WorldCollection { get; set; } = new BindableCollection<ConfigEntry>();
 		public BindableCollection<ConfigEntry> BnetCollection { get; set; } = new BindableCollection<ConfigEntry>();
 
 		// stores the filesystem path to the files
 		public string WowConfigFile { get; set; } = string.Empty;
+
 		public string BnetConfFile { get; set; } = string.Empty;
 		public string WorldConfFile { get; set; } = string.Empty;
 
@@ -39,8 +43,11 @@ namespace SPP_LegionV2_Management
 		public string LogText { get; set; }
 
 		// For search/filtering
-		public ICollectionView WorldView { get { return CollectionViewSource.GetDefaultView(WorldCollection); } }
-		public ICollectionView BnetView { get { return CollectionViewSource.GetDefaultView(BnetCollection); } }
+		public ICollectionView WorldView
+		{ get { return CollectionViewSource.GetDefaultView(WorldCollection); } }
+
+		public ICollectionView BnetView
+		{ get { return CollectionViewSource.GetDefaultView(BnetCollection); } }
 		private string _SearchBox = "";
 
 		public string SearchBox
@@ -104,15 +111,12 @@ namespace SPP_LegionV2_Management
 		// then return back the updated collection
 		public BindableCollection<ConfigEntry> UpdateConfigCollection(BindableCollection<ConfigEntry> collection, string entry, string value)
 		{
-			foreach (var item in collection)
+			foreach (var item in collection.Where(item => string.Equals(item.Name, entry, StringComparison.OrdinalIgnoreCase)))
 			{
-				if (string.Equals(item.Name, entry, StringComparison.OrdinalIgnoreCase))
-				{
-					// Update the value, then stop processing in case there's a duplicate.
-					// We'll update the first, it's most likely the original/valid one
-					item.Value = value;
-					break;
-				}
+				// Update the value, then stop processing in case there's a duplicate.
+				// We'll update the first, it's most likely the original/valid one
+				item.Value = value;
+				break;
 			}
 
 			return collection;
@@ -234,10 +238,9 @@ namespace SPP_LegionV2_Management
 			// isn't empty. May no longer need to return a normalized string if the
 			// parsing was correct when reading from file. May remove later...
 			if (collection != null)
-				foreach (var item in collection)
-					if (string.Equals(NormalizeString(item.Name), NormalizeString(searchValue), StringComparison.OrdinalIgnoreCase))
-						result = item.Value;
-
+				foreach (var item in collection.Where(item => string.Equals(NormalizeString(item.Name), NormalizeString(searchValue), StringComparison.OrdinalIgnoreCase)))
+					result = item.Value;
+				
 			return NormalizeString(result);
 		}
 
@@ -290,12 +293,8 @@ namespace SPP_LegionV2_Management
 		public string CheckCommentsInValueField(BindableCollection<ConfigEntry> collection)
 		{
 			string result = string.Empty;
-
-			foreach (var item in collection)
-			{
-				if (item.Value.Contains("#"))
-					result += $"\n⚠Warning - Entry [{item.Name}] has a \"#\" character in the value field. Best practices are to keep comments in their own line, separate from values.\n";
-			}
+			foreach (var item in collection.Where(item => item.Value.Contains("#")))
+				result += $"\n⚠Warning - Entry [{item.Name}] has a \"#\" character in the value field. Best practices are to keep comments in their own line, separate from values.\n";
 
 			return result;
 		}
@@ -407,6 +406,7 @@ namespace SPP_LegionV2_Management
 			FindConfigPaths();
 
 			string tmpstr = string.Empty;
+			bool foundEntry = false;
 
 			if (WowConfigFile == string.Empty)
 				Log("WOW Config File cannot be found - cannot update SET portal entry");
@@ -422,12 +422,10 @@ namespace SPP_LegionV2_Management
 						// would change anyways
 						if (item.Contains("SET portal"))
 						{
+							foundEntry = true;
 							Log($"WoW Client config.wtf previous 'SET portal' entry is [{item}]");
-							foreach (var entry in BnetCollection)
-							{
-								if (entry.Name.Contains("LoginREST.ExternalAddress"))
-									tmpstr += $"SET portal \"{entry.Value}\"\n";
-							}
+							foreach (var entry in BnetCollection.Where(entry => entry.Name.Contains("LoginREST.ExternalAddress")))
+								tmpstr += $"SET portal \"{entry.Value}\"\n";
 						}
 						else
 							// otherwise pass it along, dump blank lines
@@ -435,13 +433,22 @@ namespace SPP_LegionV2_Management
 							tmpstr += item + "\n";
 					}
 
-					// flush the temp string to file, overwrite
-					ExportToFile(WowConfigFile, tmpstr, false);
-					StatusBox = "";
+					if (foundEntry)
+					{
+						// flush the temp string to file, overwrite
+						ExportToFile(WowConfigFile, tmpstr, false);
+						StatusBox = "";
+					}
+					else
+					{
+						string msg = $"⚠Error updating file {WowConfigFile},\nThe WOW Client Config may be empty, near-empty, doesn't contain a portal entry, or doesn't exist.\nRun the client at least once and then exit. This will populate the config with defaults, then this tool can update it properly";
+						Log(msg);
+						Alert(msg);
+					}
 				}
 				catch (Exception e)
 				{
-					string msg = $"Error accessing file {WowConfigFile},\nthere is a permissions problem.\nThe detailed exception is -\n{e.ToString()}";
+					string msg = $"⚠Error accessing file {WowConfigFile},\nthere is a permissions problem.\nThe WOW Client Config may be empty or near-empty, or doesn't exist.\nRun the client at least once and then exit. This will populate the config with defaults, then this tool can update it properly";
 					Log(msg);
 					Alert(msg);
 				}
@@ -555,50 +562,63 @@ namespace SPP_LegionV2_Management
 		{
 			// Find our world/bnet configs
 			if (GeneralSettingsManager.GeneralSettings.SPPFolderLocation?.Length == 0)
+			{
 				Log("SPP Folder Location is empty, cannot find existing settings to parse.");
+			}
+			else if (File.Exists($"{GeneralSettingsManager.GeneralSettings.SPPFolderLocation}\\Servers\\worldserver.conf")
+				|| File.Exists($"{GeneralSettingsManager.GeneralSettings.SPPFolderLocation}\\Servers\\bnetserver.conf")
+				|| (Directory.Exists($"{GeneralSettingsManager.GeneralSettings.SPPFolderLocation}\\Servers")))
+			{
+				// Either we find the files themselves, or we found the Servers folder and we'll generate them here on saving
+				// since this is the best guess given our saved path info
+				WorldConfFile = $"{GeneralSettingsManager.GeneralSettings.SPPFolderLocation}\\Servers\\worldserver.conf";
+				BnetConfFile = $"{GeneralSettingsManager.GeneralSettings.SPPFolderLocation}\\Servers\\bnetserver.conf";
+			}
 			else
 			{
-				if (File.Exists($"{GeneralSettingsManager.GeneralSettings.SPPFolderLocation}\\worldserver.conf")
-					|| File.Exists($"{GeneralSettingsManager.GeneralSettings.SPPFolderLocation}\\bnetserver.conf"))
-				{
-					WorldConfFile = $"{GeneralSettingsManager.GeneralSettings.SPPFolderLocation}\\worldserver.conf";
-					BnetConfFile = $"{GeneralSettingsManager.GeneralSettings.SPPFolderLocation}\\bnetserver.conf";
-				}
-				else if (File.Exists($"{GeneralSettingsManager.GeneralSettings.SPPFolderLocation}\\Servers\\worldserver.conf")
-					|| File.Exists($"{GeneralSettingsManager.GeneralSettings.SPPFolderLocation}\\Servers\\bnetserver.conf")
-					|| (Directory.Exists($"{GeneralSettingsManager.GeneralSettings.SPPFolderLocation}\\Servers")))
-				{
-					// Either we find the files themselves, or we found the Servers folder and we'll generate them here on saving
-					// since this is the best guess given our saved path info
-					WorldConfFile = $"{GeneralSettingsManager.GeneralSettings.SPPFolderLocation}\\Servers\\worldserver.conf";
-					BnetConfFile = $"{GeneralSettingsManager.GeneralSettings.SPPFolderLocation}\\Servers\\bnetserver.conf";
-				}
-				else
-				{
-					// In case folder location changed, may still need to update this
-					WorldConfFile = "";
-					BnetConfFile = "";
-					WorldCollection.Clear();
-					BnetCollection.Clear();
-				}
+				// In case folder location changed, may still need to update this
+				WorldConfFile = "";
+				BnetConfFile = "";
+				WorldCollection.Clear();
+				BnetCollection.Clear();
 			}
 
 			// Find our wow client config
 			if (GeneralSettingsManager.GeneralSettings.WOWConfigLocation?.Length == 0)
+			{
 				Log("WOW Client Folder Location is empty, cannot find existing settings to parse.");
+			}
 			else
 			{
-				if (File.Exists($"{GeneralSettingsManager.GeneralSettings.WOWConfigLocation}\\config.wtf"))
-					WowConfigFile = $"{GeneralSettingsManager.GeneralSettings.WOWConfigLocation}\\config.wtf";
-				else if (File.Exists($"{GeneralSettingsManager.GeneralSettings.WOWConfigLocation}\\WTF\\config.wtf")
-					|| (Directory.Exists($"{GeneralSettingsManager.GeneralSettings.WOWConfigLocation}\\WTF")))
-					// Either we find the file, or we found the WTF folder and we'll assume this is it
-					// since this is the best guess given our saved path info. Won't be anything to parse, though
-					// if the file itself doesn't exist. Sad face...
-					WowConfigFile = $"{GeneralSettingsManager.GeneralSettings.WOWConfigLocation}\\WTF\\config.wtf";
-				else
-					// In case folder location was changed, this will catch
-					WowConfigFile = "";
+				WowConfigFile = "";
+
+				// See if our saved location ends with .wtf for direct file
+				if (GeneralSettingsManager.GeneralSettings.WOWConfigLocation.EndsWith(".wtf"))
+				{
+					if (File.Exists(GeneralSettingsManager.GeneralSettings.WOWConfigLocation))
+						WowConfigFile = GeneralSettingsManager.GeneralSettings.WOWConfigLocation;
+				}
+				else // pull files from the path if we're able
+				{
+					try
+					{
+						string[] files = Directory.GetFiles(GeneralSettingsManager.GeneralSettings.WOWConfigLocation, "*.wtf");
+						if (files.Any())
+							WowConfigFile = files[0];
+						else
+						{
+							files = Directory.GetFiles(GeneralSettingsManager.GeneralSettings.WOWConfigLocation + "\\WTF", "*.wtf");
+							if (files.Any())
+								WowConfigFile = files[0];
+						}
+					}
+					catch { }
+				}
+			}
+			if (WowConfigFile.EndsWith(".wtf") && !announcedClientConfig)
+			{
+				Log($"Using Client config: {WowConfigFile}");
+				announcedClientConfig = true;
 			}
 		}
 
@@ -652,6 +672,9 @@ namespace SPP_LegionV2_Management
 			string wowConfigPortal = string.Empty;
 			string bnetBindIP = GetValueFromCollection(BnetCollection, "BindIP");
 			string worldBindIP = GetValueFromCollection(WorldCollection, "BindIP");
+			string worldServerPort = GetValueFromCollection(WorldCollection, "WorldServerPort");
+			string DBServerPort = MySqlManager.MySQLQueryToString(@"SELECT `port` FROM `legion_auth`.`realmlist` WHERE id = '1'");
+			string DBGamePort = MySqlManager.MySQLQueryToString(@"SELECT `gamePort` FROM `legion_auth`.`realmlist` WHERE id = '1'");
 			bool solocraft = IsOptionEnabled(WorldCollection, "Solocraft.Enable");
 			bool flexcraftHealth = IsOptionEnabled(WorldCollection, "HealthCraft.Enable");
 			bool flexcraftUnitMod = IsOptionEnabled(WorldCollection, "UnitModCraft.Enable");
@@ -660,7 +683,6 @@ namespace SPP_LegionV2_Management
 			bool purchaseShop = IsOptionEnabled(WorldCollection, "Purchase.Shop.Enabled");
 			bool battleCoinVendor = IsOptionEnabled(WorldCollection, "Battle.Coin.Vendor.Enable");
 			bool battleCoinVendorCustom = IsOptionEnabled(WorldCollection, "Battle.Coin.Vendor.Custom.Enable");
-			bool gridUnload = IsOptionEnabled(WorldCollection, "GridUnload");
 			bool baseMapLoadAllGrids = IsOptionEnabled(WorldCollection, "BaseMapLoadAllGrids");
 			bool instanceMapLoadAllGrids = IsOptionEnabled(WorldCollection, "InstanceMapLoadAllGrids");
 			bool disallowMultipleClients = IsOptionEnabled(WorldCollection, "Disallow.Multiple.Client");
@@ -668,6 +690,7 @@ namespace SPP_LegionV2_Management
 			bool customNoCastTime = IsOptionEnabled(WorldCollection, "Custom.NoCastTime");
 			bool worldChat = IsOptionEnabled(WorldCollection, "WorldChat.Enable");
 			bool characterTemplate = IsOptionEnabled(WorldCollection, "Character.Template");
+			bool garrisonDisableUpgrade = IsOptionEnabled(WorldCollection, "Garrisone.DisableUpgrade");
 
 			// If we just applied defaults, and there's still nothing, then something went wrong... missing templates?
 			if (BnetCollection.Count == 0 || WorldCollection.Count == 0)
@@ -700,9 +723,8 @@ namespace SPP_LegionV2_Management
 				}
 
 				// Check existing world entries, see if anything exists that isn't in the template.
-				foreach (var item in WorldCollection)
-					if (CheckCollectionForMatch(WorldCollectionTemplate, item.Name) == false)
-						result += $"⚠ Warning - [{item.Name}] exists in current World settings, but not in template. Please verify whether this entry is needed any longer.\n\n";
+				foreach (var item in WorldCollection.Where(item => !CheckCollectionForMatch(WorldCollectionTemplate, item.Name)))
+					result += $"⚠ Warning - [{item.Name}] exists in current World settings, but not in template. Please verify whether this entry is needed any longer.\n\n";
 
 				// Compare build# between bnet/world/realm
 				if (buildFromBnet != buildFromDB || buildFromBnet != buildFromWorld)
@@ -726,10 +748,10 @@ namespace SPP_LegionV2_Management
 					result += $"✓ - BindIP settings match [{worldBindIP}] and are set properly.\n\n";
 
 				// Gather WoW portal IP from config.wtf
-				if (File.Exists(WowConfigFile) == false)
+				if (!File.Exists(WowConfigFile))
 				{
 					Log("WOW Config File cannot be found - cannot parse SET portal entry");
-					result += "⚠ Alert - WOW Config file not found, cannot check [SET portal] entry to compare.\n\n";
+					result += "⚠ Alert - WOW Config file not found, cannot check [SET portal] entry to compare\n\n";
 				}
 				else
 				{
@@ -737,28 +759,34 @@ namespace SPP_LegionV2_Management
 					List<string> allLinesText = File.ReadAllLines(WowConfigFile).ToList();
 
 					if (allLinesText.Count < 2)
+					{
 						Log($"⚠ Warning - WoW Client config file [{WowConfigFile}] may be empty.");
 
-					foreach (var item in allLinesText)
+						// Alert the user to run Wow client at least once to populate the config
+						result += "⚠ Warning - The WOW Client Config is empty or near-empty, run the client at least once and then exit. This will populate the config with defaults, then this tool can update it properly\n\n";
+					}
+
+					// If it's the portal entry, process further
+					// split by " and 2nd item will be IP
+					foreach (var item in allLinesText.Where(item => item.Contains("SET portal")))
 					{
-						// If it's the portal entry, process further
-						// split by " and 2nd item will be IP
-						if (item.Contains("SET portal"))
-						{
-							string[] phrase = item.Split('"');
-							wowConfigPortal = phrase[1];
-						}
+						string[] phrase = item.Split('"');
+						wowConfigPortal = phrase[1];
 					}
 				}
 
 				// List our external/hosting IP settings
-				if ((loginRESTExternalAddress != addressFromDB) || (loginRESTExternalAddress != wowConfigPortal))
+				if ((loginRESTExternalAddress != addressFromDB) || ((loginRESTExternalAddress != wowConfigPortal) && (File.Exists(WowConfigFile))))
 				{
 					result += $"LoginREST.ExternalAddress - {loginRESTExternalAddress}\n";
 					result += $"Address from DB Realm - {addressFromDB}\n";
 					result += $"Wow config PORTAL entry - {wowConfigPortal}\n";
-					result += "⚠ Alert - All of these addresses should match. Use the \"Set IP\" button to set.\n\n";
+					result += "⚠ Alert - All of these addresses should match. Use the \"Set IP\" button to set. Ignore if client config is the issue and doesn't need to be updated\n\n";
 				}
+				else if ((loginRESTExternalAddress == addressFromDB) && (File.Exists(WowConfigFile) == false))
+					result += $"⚠ Warning - IP settings for DB and Bnet config match [{addressFromDB}], but client config could not be verified, may be missing\n\n";
+				else if (!File.Exists(WowConfigFile))
+					result += $"⚠ Warning - IP settings for client config cannot be verified\n\n";
 				else
 					result += $"✓ - IP settings for hosting all match [{addressFromDB}]\n\n";
 
@@ -768,6 +796,24 @@ namespace SPP_LegionV2_Management
 					result += $"LoginREST.LocalAddress - {loginRESTLocalAddress}\n";
 					result += $"local Address from DB - {localAddressFromDB}\n";
 					result += "⚠ Alert - both of these addresses should match, and probably both be set to 127.0.0.1\n\n";
+				}
+
+				// Check the port setting in config vs DB
+				if (worldServerPort != DBServerPort)
+				{
+					result += $"WorldServerPort - {worldServerPort}\n";
+					result += $"Server Port from DB - {DBServerPort}\n";
+					result += "⚠ Alert - both of these ports should match or you won't be able to connect\n\n";
+				}
+
+				// Check ports vs defaults
+				if (worldServerPort != "8198")
+				{
+					result += "⚠ Warning - WorldServerPort is not 8198, which is the default. This may lead to unexpected issues\n\n";
+				}
+				if (DBGamePort != "8086")
+				{
+					result += "⚠ Warning - Database realm gamePort is not 8086, which is the default. This may lead to unexpected issues\n\n";
 				}
 
 				// Check our solocraft settings compared to FlexCraft entries
@@ -803,8 +849,6 @@ namespace SPP_LegionV2_Management
 				// Warn about grid related settings
 				if (baseMapLoadAllGrids || instanceMapLoadAllGrids)
 					result += "⚠ Warning - BaseMapLoadAllGrids and InstanceMapLoadAllGrids should be set to 0. If the worldserver crashes on loading maps or runs out of memory, this may be why.\n\n";
-				if (gridUnload == false)
-					result += $"⚠ Warning - GridUnload may need set to 1 to unload unused map grids and release memory. If the server runs out of memory, or crashes with high usage, this may be why.\n\n";
 
 				// Notify if Disallow.Multiple.Client is enabled
 				if (disallowMultipleClients)
@@ -818,6 +862,10 @@ namespace SPP_LegionV2_Management
 
 				if (customNoCastTime)
 					result += "Note - you have Custom.NoCastTime = 1 and may cause unintended effects when casting. Set entry to 0 if you need that to change\n\n";
+
+				// Check if Garrisons upgrade is disabled
+				if (garrisonDisableUpgrade)
+					result += "⚠ Warning - Garrisone.DisableUpgrade is set to 1, this will cause issues upgrading a Garrison. Set to 0 to enable\n\n";
 
 				// Check collections for duplicate entries, and strip out the &
 				// at the end of the string. This will leave the final as listing

@@ -20,7 +20,7 @@
 				</Style>
 			</TabControl.Resources>
 			<TabItem Header="Accounts" Margin="1" Background="#353535">
-				<Grid >
+				<Grid>
 					<Grid.ColumnDefinitions>
 						<ColumnDefinition Width="*" />
 						<ColumnDefinition Width="*" />
@@ -31,19 +31,19 @@
 					</Grid.RowDefinitions>
 
 					<!-- Buttons for left side -->
-					<WrapPanel Orientation="Horizontal" HorizontalAlignment="Center" >
+					<WrapPanel Orientation="Horizontal" HorizontalAlignment="Center">
 
-						<Button x:Name="RetrieveAccounts" Margin="5" MaxWidth="265"
+						<Button x:Name="RetrieveAccounts" Margin="5" MaxWidth="200"
 							local:EyeCandyForeGround.Image="/Resources/Buttons/ShowAccounts.png"
 							Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
 							ToolTip="Retreives Legion Account/BNET account info from the database" />
 
-						<Button x:Name="AddAccount" Margin="5" MaxWidth="265"
+						<Button x:Name="AddAccount" Margin="5" MaxWidth="200"
 							local:EyeCandyForeGround.Image="/Resources/Buttons/CreateAccount.png"
 							Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
 							ToolTip="Open Dialog to create an account and BNET account" />
 
-						<Button x:Name="DeleteSelectedAccount" Margin="5" MaxWidth="265"
+						<Button x:Name="DeleteSelectedAccount" Margin="5" MaxWidth="200"
 							local:EyeCandyForeGround.Image="/Resources/Buttons/DeleteAccount.png"
 							Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
 							ToolTip="Delete the selected account, may take a while if there are a lot of database objects" />
@@ -81,8 +81,8 @@
 					<!-- Buttons for top-right side -->
 					<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Grid.Column="1">
 
-						<Button x:Name="ApplyAccountChanges" Margin="5"  MaxWidth="450"
-							local:EyeCandyForeGround.Image="/Resources/Buttons/ApplyChangesToDatabase.png" MaxHeight="60"
+						<Button x:Name="ApplyAccountChanges" Margin="5"  MaxWidth="200"
+							local:EyeCandyForeGround.Image="/Resources/Buttons/ApplyChangesToDatabase.png"
 							Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
 							ToolTip="Save any account changes to the database" />
 					</StackPanel>
@@ -113,9 +113,9 @@
 								ToolTip="Password required when changing Bnet login, or can update a password if needed" />
 							<TextBox x:Name="CurrentUsername"  Width="125" HorizontalAlignment="Left" />
 							<TextBox x:Name="CurrentBattleCoins"  Width="125" HorizontalAlignment="Left"
-								ToolTip="Set this account's amount of Battle Coins"/>
+								ToolTip="Set this account's amount of Battle Coins" />
 							<TextBox x:Name="CurrentGMLevel"  Width="125" HorizontalAlignment="Left"
-								ToolTip="GM Level set to -1 or 0 to disable, or between 1 and 6" />
+								ToolTip="GM Level set to -1 or 0 to disable, or between 1 and 6 normally" />
 							<CheckBox x:Name="CurrentRareBattlePets" Margin="2" HorizontalAlignment="Left"
 								ToolTip="Checking this box, and hitting Apply, changes all CURRENT BattlePets on this account to rare quality" />
 							<CheckBox x:Name="CurrentXPBattlePets" Margin="2" HorizontalAlignment="Left">
@@ -148,12 +148,12 @@
 
 					<WrapPanel Orientation="Horizontal" HorizontalAlignment="Center">
 
-						<Button x:Name="RetrieveCharacters" Margin="5" MaxWidth="265"
+						<Button x:Name="RetrieveCharacters" Margin="5" MaxWidth="200"
 							local:EyeCandyForeGround.Image="/Resources/Buttons/ShowCharacters.png"
 							Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
 							ToolTip="Retreives character info from the database" />
 
-						<Button x:Name="DeleteSelectedCharacter" Margin="5" MaxWidth="265"
+						<Button x:Name="DeleteSelectedCharacter" Margin="5" MaxWidth="200"
 							local:EyeCandyForeGround.Image="/Resources/Buttons/DeleteCharacter.png"
 							Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
 							ToolTip="Delete the selected account" />
@@ -190,8 +190,8 @@
 					<!-- Buttons for top-right side -->
 					<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Grid.Column="1">
 
-						<Button x:Name="ApplyCharacterChanges" Margin="5" MaxWidth="450"
-							local:EyeCandyForeGround.Image="/Resources/Buttons/ApplyChangesToDatabase.png" MaxHeight="60"
+						<Button x:Name="ApplyCharacterChanges" Margin="5" MaxWidth="200"
+							local:EyeCandyForeGround.Image="/Resources/Buttons/ApplyChangesToDatabase.png"
 							Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
 							ToolTip="Save any character changes to the database" />
 					</StackPanel>
@@ -203,7 +203,9 @@
 							<TextBlock Text="Selected Character GUID:" />
 							<TextBlock Text="Selected Character Account ID:" Margin="2" />
 							<TextBlock Text="Selected Character Name:" Margin="3" />
-							<TextBlock Text="Status:" Margin="2" />
+							<TextBlock Text="Selected Character Artifacts" Margin="2,7,2,2" />
+							<TextBlock Text="Selected Artifact Power" Margin="2,7,2,2" />
+							<TextBlock Text="Status:" Margin="2,7,2,2" />
 						</StackPanel>
 						<StackPanel Margin="0,1">
 							<TextBlock x:Name="CharactersTotal" />
@@ -212,6 +214,21 @@
 								ToolTip="You can change this to another account if you want to move this character to another (possibly unsafe), apply changes button when done" />
 							<TextBox x:Name="CurrentCharacterName"  Width="125" HorizontalAlignment="Left"
 								ToolTip="Use this to change the character name, apply changes button when done" />
+							<ComboBox x:Name="Artifacts" Width="189" Margin="2" Height="4"
+								ItemsSource="{Binding Artifacts}" SelectedItem="{Binding SelectedArtifact}"
+								DisplayMemberPath="ItemGUID"
+								ToolTip="Select an artifact for the selected character" />
+							<TextBox x:Name="CurrentArtifactPower" Width="125" HorizontalAlignment="Left">
+								<TextBox.ToolTip>
+									<TextBlock>
+										WARNING: CHANGES HAPPEN IMMEDIATELY!
+										<LineBreak />
+										Set the Artifact Power to be used for Artifact Traits - Max value is 9223372036854775808
+										<LineBreak />
+										Relog character to see changes
+									</TextBlock>
+								</TextBox.ToolTip>
+							</TextBox>
 							<TextBlock x:Name="CharacterStatus" />
 						</StackPanel>
 					</StackPanel>
@@ -231,12 +248,12 @@
 
 					<WrapPanel Orientation="Horizontal" HorizontalAlignment="Center">
 
-						<Button x:Name="RetrieveOrphanedCharacters" Margin="5" MaxWidth="265"
+						<Button x:Name="RetrieveOrphanedCharacters" Margin="5" MaxWidth="200"
 							local:EyeCandyForeGround.Image="/Resources/Buttons/ShowCharacters.png"
 							Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
 							ToolTip="Retreives character info from the database" />
 
-						<Button x:Name="DeleteOrphanedCharacters" Margin="5" MaxWidth="265" MaxHeight="35"
+						<Button x:Name="DeleteOrphanedCharacters" Margin="5" MaxWidth="200"
 							local:EyeCandyForeGround.Image="/Resources/Buttons/DeleteOrphanedCharacters.png"
 							Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
 							ToolTip="Delete the orphaned characters (may take a while)" />
@@ -270,7 +287,7 @@
 
 					<!-- Buttons for top-right side -->
 					<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Grid.Column="1">
-						<Button x:Name="ApplyOrphanedCharacterChanges" Margin="5" MaxWidth="450" MaxHeight="60"
+						<Button x:Name="ApplyOrphanedCharacterChanges" Margin="5" MaxWidth="200"
 							local:EyeCandyForeGround.Image="/Resources/Buttons/ApplyChangesToDatabase.png"
 							Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
 							ToolTip="Save any character changes to the database" />
@@ -307,12 +324,12 @@
 					</Grid.RowDefinitions>
 
 					<WrapPanel Orientation="Horizontal" HorizontalAlignment="Center">
-						<Button x:Name="GetOrphanedData" Margin="5" MaxWidth="537"
+						<Button x:Name="GetOrphanedData" Margin="5" MaxWidth="200"
 							local:EyeCandyForeGround.Image="/Resources/Buttons/ListOrphanedObjects.png"
 							Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
 							ToolTip="Calculate the orphaned objects" />
 
-						<Button x:Name="RemoveOrphanedItems" Margin="5" MaxWidth="537"
+						<Button x:Name="RemoveOrphanedItems" Margin="5" MaxWidth="200"
 							local:EyeCandyForeGround.Image="/Resources/Buttons/RemoveOrphanedObjects.png"
 							Style="{DynamicResource ImageButtonStyle}" Background="Transparent"
 							ToolTip="Delete the orphaned objects (may take a while)" />

@@ -1,5 +1,6 @@
 ﻿using Caliburn.Micro;
 using MahApps.Metro.Controls.Dialogs;
+using Microsoft.Win32;
 using Ookii.Dialogs.Wpf;
 
 namespace SPP_LegionV2_Management
@@ -9,8 +10,10 @@ namespace SPP_LegionV2_Management
 		// IDialogCoordinator is for metro message boxes
 		private readonly IDialogCoordinator _dialogCoordinator;
 
-		public string SPPFolderLocation { get { return GeneralSettingsManager.GeneralSettings.SPPFolderLocation; } set { GeneralSettingsManager.GeneralSettings.SPPFolderLocation = value; } }
-		public string WOWConfigLocation { get { return GeneralSettingsManager.GeneralSettings.WOWConfigLocation; } set { GeneralSettingsManager.GeneralSettings.WOWConfigLocation = value; } }
+		public string SPPFolderLocation
+		{ get { return GeneralSettingsManager.GeneralSettings.SPPFolderLocation; } set { GeneralSettingsManager.GeneralSettings.SPPFolderLocation = value; } }
+		public string WOWConfigLocation
+		{ get { return GeneralSettingsManager.GeneralSettings.WOWConfigLocation; } set { GeneralSettingsManager.GeneralSettings.WOWConfigLocation = value; } }
 
 		// IDialogCoordinator is part of Metro, for dialog handling in the view model
 		public SettingsViewModel(IDialogCoordinator instance)
@@ -22,7 +25,7 @@ namespace SPP_LegionV2_Management
 		public void SPPFolderBrowse()
 		{
 			// If it's empty, then it was cancelled and we keep the old setting
-			string tmp = BrowseFolder();
+			string tmp = BrowseFolder(true);
 			if (tmp != string.Empty)
 			{
 				SPPFolderLocation = tmp;
@@ -43,20 +46,33 @@ namespace SPP_LegionV2_Management
 		}
 
 		// Method to browse to a folder
-		public string BrowseFolder()
+		public string BrowseFolder(bool folderOnly = false)
 		{
-			const string baseFolder = @"C:\";
 			string result = string.Empty;
-			try
+
+			if (folderOnly)
 			{
-				VistaFolderBrowserDialog dialog = new VistaFolderBrowserDialog();
-				dialog.Description = "Please select a folder.";
-				dialog.UseDescriptionForTitle = true; // This applies to the Vista style dialog only, not the old dialog.
-				dialog.SelectedPath = baseFolder; // place to start search
-				if ((bool)dialog.ShowDialog())
-					result = dialog.SelectedPath;
+				const string baseFolder = @"C:\";
+				try
+				{
+					VistaFolderBrowserDialog dialog = new VistaFolderBrowserDialog();
+					dialog.Description = "Please select a folder.";
+					dialog.UseDescriptionForTitle = true; // This applies to the Vista style dialog only, not the old dialog.
+					dialog.SelectedPath = baseFolder; // place to start search
+					if ((bool)dialog.ShowDialog())
+						result = dialog.SelectedPath;
+				}
+				catch { return string.Empty; }
 			}
-			catch { return string.Empty; }
+			else
+			{
+				OpenFileDialog openFileDialog = new OpenFileDialog();
+				openFileDialog.Filter = "wtf files (*.wtf)|*.wtf";
+				openFileDialog.InitialDirectory = @"C:\";
+				openFileDialog.Title = "Please select a WoW client config file.";
+				if (openFileDialog.ShowDialog() == true)
+					result = openFileDialog.FileName;
+			}
 
 			return result;
 		}
